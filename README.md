@@ -2,7 +2,7 @@
 
 A PyPI package that wraps NVIDIA's Canary-1B-v2 model (via NeMo toolkit) for speech-to-text (STT) transcription, compatible with the FastRTC STTModel protocol.
 
-Canary is a multilingual ASR model supporting **English, German, French, and Spanish**, built on NVIDIA's FastConformer-Transformer encoder-decoder architecture.
+Canary is a multilingual ASR model supporting **25 European languages**, built on NVIDIA's FastConformer-Transformer encoder-decoder architecture.
 
 ## Installation
 
@@ -92,12 +92,28 @@ from canary_fastrtc import CanarySTT
 model = CanarySTT(language="de")
 text = model.stt((sample_rate, german_audio))
 
+# Transcribe Italian audio
+model = CanarySTT(language="it")
+text = model.stt((sample_rate, italian_audio))
+
 # Transcribe French audio
 model = CanarySTT(language="fr")
 text = model.stt((sample_rate, french_audio))
 ```
 
-Supported languages: `en` (English), `de` (German), `fr` (French), `es` (Spanish).
+Supported languages:
+
+| Code | Language | Code | Language | Code | Language |
+|------|----------|------|----------|------|----------|
+| `bg` | Bulgarian | `hu` | Hungarian | `pt` | Portuguese |
+| `hr` | Croatian | `it` | Italian | `ro` | Romanian |
+| `cs` | Czech | `lv` | Latvian | `sk` | Slovak |
+| `da` | Danish | `lt` | Lithuanian | `sl` | Slovenian |
+| `nl` | Dutch | `mt` | Maltese | `es` | Spanish |
+| `en` | English | `pl` | Polish | `sv` | Swedish |
+| `et` | Estonian | `ru` | Russian | `uk` | Ukrainian |
+| `fi` | Finnish | `de` | German | | |
+| `fr` | French | `el` | Greek | | |
 
 ## Available Models
 

@@ -22,6 +22,25 @@ def test_model_custom_language():
     assert model.language == "de"
 
 
+def test_model_italian_language():
+    """Test that Italian language can be set."""
+    model = CanarySTT(device="cpu", language="it")
+    assert model.language == "it"
+
+
+def test_all_supported_languages():
+    """Test that all 25 supported languages are recognized."""
+    expected_languages = (
+        "bg", "hr", "cs", "da", "nl",
+        "en", "et", "fi", "fr", "de",
+        "el", "hu", "it", "lv", "lt",
+        "mt", "pl", "pt", "ro", "sk",
+        "sl", "es", "sv", "ru", "uk",
+    )
+    assert CanarySTT.SUPPORTED_LANGUAGES == expected_languages
+    assert len(CanarySTT.SUPPORTED_LANGUAGES) == 25
+
+
 def test_helper_function():
     """Test the helper function."""
     model = get_stt_model(device="cpu")

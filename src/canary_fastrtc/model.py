@@ -20,14 +20,21 @@ class CanarySTT:
     A Speech-to-Text model using NVIDIA's Canary-1B-v2 via the NeMo toolkit.
     Implements the FastRTC STTModel protocol.
 
-    Canary is a multilingual ASR model supporting English, German, French, and Spanish.
+    Canary is a multilingual ASR model supporting 25 European languages.
     It uses a FastConformer-Transformer encoder-decoder architecture.
+
+    Supported languages:
+        bg (Bulgarian), hr (Croatian), cs (Czech), da (Danish), nl (Dutch),
+        en (English), et (Estonian), fi (Finnish), fr (French), de (German),
+        el (Greek), hu (Hungarian), it (Italian), lv (Latvian), lt (Lithuanian),
+        mt (Maltese), pl (Polish), pt (Portuguese), ro (Romanian), sk (Slovak),
+        sl (Slovenian), es (Spanish), sv (Swedish), ru (Russian), uk (Ukrainian)
 
     Attributes:
         model_id: The NVIDIA NeMo model ID
         device: The device to run inference on ('cpu', 'cuda')
         dtype: Data type for model weights (float16, float32, bfloat16)
-        language: Source language for transcription (en, de, fr, es)
+        language: Source language for transcription
     """
 
     MODEL_OPTIONS = Literal[
@@ -35,7 +42,13 @@ class CanarySTT:
         "nvidia/canary-1b",
     ]
 
-    SUPPORTED_LANGUAGES = ("en", "de", "fr", "es")
+    SUPPORTED_LANGUAGES = (
+        "bg", "hr", "cs", "da", "nl",
+        "en", "et", "fi", "fr", "de",
+        "el", "hu", "it", "lv", "lt",
+        "mt", "pl", "pt", "ro", "sk",
+        "sl", "es", "sv", "ru", "uk",
+    )
 
     def __init__(
         self,
@@ -51,7 +64,7 @@ class CanarySTT:
             model: Model ID to use (nvidia/canary-1b-v2 or nvidia/canary-1b)
             device: Device to use for inference (auto-detected if None)
             dtype: Model precision (float16 recommended for GPU inference)
-            language: Source language code (en, de, fr, es)
+            language: Source language code (one of 25 supported languages, e.g. en, it, de, fr, es)
         """
         self.model_id = model
         self.language = language
@@ -163,6 +176,8 @@ class CanarySTT:
             transcriptions = self.asr_model.transcribe(
                 audio=[tmp_path],
                 batch_size=1,
+                source_lang=self.language,
+                target_lang=self.language,
             )
 
             # Handle different return types from NeMo
