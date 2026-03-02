@@ -109,8 +109,12 @@ class CanarySTT:
 
     def _load_model(self):
         """Load the Canary model via NVIDIA NeMo toolkit."""
+        import logging
+        _log = logging.getLogger(__name__)
+
         self._sanitize_omp_num_threads()
 
+        _log.info("Importing NeMo ASR (this may take a moment) …")
         try:
             import nemo.collections.asr as nemo_asr
         except ImportError:
@@ -118,11 +122,17 @@ class CanarySTT:
                 "NeMo toolkit is required for NVIDIA Canary models. "
                 "Install it with: pip install nemo_toolkit[asr]"
             )
+        _log.info("NeMo ASR imported successfully")
 
+        _log.info(
+            f"Downloading / loading model '{self.model_id}' "
+            f"(first run downloads ~2 GB) …"
+        )
         self.asr_model = nemo_asr.models.ASRModel.from_pretrained(
             model_name=self.model_id
         )
         self.asr_model.eval()
+        _log.info(f"Model '{self.model_id}' loaded and ready")
 
         # Move to specified device
         if self.device != "cpu":
