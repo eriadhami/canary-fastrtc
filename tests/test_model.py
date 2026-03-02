@@ -1,4 +1,5 @@
 import numpy as np
+import os
 import pytest
 from canary_fastrtc import CanarySTT, get_stt_model
 
@@ -39,6 +40,42 @@ def test_all_supported_languages():
     )
     assert CanarySTT.SUPPORTED_LANGUAGES == expected_languages
     assert len(CanarySTT.SUPPORTED_LANGUAGES) == 25
+
+
+def test_sanitize_omp_num_threads_millicore():
+    """Test that Kubernetes millicore OMP_NUM_THREADS is sanitized."""
+    original = os.environ.get("OMP_NUM_THREADS")
+    try:
+        os.environ["OMP_NUM_THREADS"] = "3500m"
+        CanarySTT._sanitize_omp_num_threads()
+        assert os.environ["OMP_NUM_THREADS"] == "4"  # 3500m -> ceil(3.5) = 4
+
+        os.environ["OMP_NUM_THREADS"] = "1000m"
+        CanarySTT._sanitize_omp_num_threads()
+        assert os.environ["OMP_NUM_THREADS"] == "1"
+
+        os.environ["OMP_NUM_THREADS"] = "500m"
+        CanarySTT._sanitize_omp_num_threads()
+        assert os.environ["OMP_NUM_THREADS"] == "1"
+    finally:
+        if original is None:
+            os.environ.pop("OMP_NUM_THREADS", None)
+        else:
+            os.environ["OMP_NUM_THREADS"] = original
+
+
+def test_sanitize_omp_num_threads_valid_integer():
+    """Test that valid integer OMP_NUM_THREADS is left unchanged."""
+    original = os.environ.get("OMP_NUM_THREADS")
+    try:
+        os.environ["OMP_NUM_THREADS"] = "4"
+        CanarySTT._sanitize_omp_num_threads()
+        assert os.environ["OMP_NUM_THREADS"] == "4"
+    finally:
+        if original is None:
+            os.environ.pop("OMP_NUM_THREADS", None)
+        else:
+            os.environ["OMP_NUM_THREADS"] = original
 
 
 def test_helper_function():

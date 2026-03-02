@@ -88,8 +88,29 @@ class CanarySTT:
         # Load the model
         self._load_model()
 
+    @staticmethod
+    def _sanitize_omp_num_threads():
+        """
+        Sanitize OMP_NUM_THREADS if set to a non-integer value.
+
+        Kubernetes often sets OMP_NUM_THREADS to millicore format (e.g. '3500m'),
+        which causes numexpr (imported transitively by NeMo via pandas) to crash
+        with: ValueError: invalid literal for int() with base 10: '3500m'
+        """
+        omp = os.environ.get("OMP_NUM_THREADS", "")
+        if omp and not omp.isdigit():
+            # Convert Kubernetes millicore format (e.g. '3500m' -> 4 threads)
+            if omp.endswith("m") and omp[:-1].isdigit():
+                millicores = int(omp[:-1])
+                threads = max(1, (millicores + 999) // 1000)  # round up
+            else:
+                threads = max(1, os.cpu_count() or 1)
+            os.environ["OMP_NUM_THREADS"] = str(threads)
+
     def _load_model(self):
         """Load the Canary model via NVIDIA NeMo toolkit."""
+        self._sanitize_omp_num_threads()
+
         try:
             import nemo.collections.asr as nemo_asr
         except ImportError:
