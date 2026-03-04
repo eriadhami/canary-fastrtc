@@ -18,7 +18,9 @@ import tempfile
 import numpy as np
 from numpy.typing import NDArray
 import torch
-from nemo.collections.asr.models import ASRModel
+# NOTE: NeMo is imported lazily inside _load_model() to avoid blocking
+# the main thread for minutes at import time.  Do NOT add a top-level
+# ``from nemo.collections.asr.models import ASRModel`` here.
 
 logger = logging.getLogger(__name__)
 
@@ -116,11 +118,17 @@ class CanarySTT:
 
         logger.info("Loading model '%s' (target device=%s) …", self.model_id, self.device)
 
-        # 1. from_pretrained — always on CPU first
+        # 0. Lazy-import NeMo (takes 2-4 min; must NOT happen at module level)
         t0 = _time.monotonic()
+        logger.info("[0/5] Importing NeMo ASR …")
+        from nemo.collections.asr.models import ASRModel  # noqa: delayed import
+        logger.info("[0/5] NeMo imported (%.1fs)", _time.monotonic() - t0)
+
+        # 1. from_pretrained — always on CPU first
+        t1 = _time.monotonic()
         logger.info("[1/5] ASRModel.from_pretrained (CPU) …")
         self.asr_model = ASRModel.from_pretrained(model_name=self.model_id)
-        logger.info("[2/5] from_pretrained done (%.1fs)", _time.monotonic() - t0)
+        logger.info("[2/5] from_pretrained done (%.1fs)", _time.monotonic() - t1)
 
         self.asr_model.eval()
         logger.info("[3/5] model.eval() done")
