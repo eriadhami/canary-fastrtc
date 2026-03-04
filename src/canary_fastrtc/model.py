@@ -106,32 +106,51 @@ class CanarySTT:
     # ------------------------------------------------------------------ #
 
     def _load_model(self):
-        """Load the Canary model following the proven NeMo pattern."""
+        """Load the Canary model following the proven NeMo pattern.
 
-        logger.info("Loading model '%s' ...", self.model_id)
+        Always loads weights on **CPU** first (avoids CUDA-init hangs on
+        cloud platforms like HF Spaces where the GPU driver may not be
+        fully ready at import time), then moves to the requested device.
+        """
+        import time as _time
 
-        # Exactly: ASRModel.from_pretrained(model_name=...)
+        logger.info("Loading model '%s' (target device=%s) …", self.model_id, self.device)
+
+        # 1. from_pretrained — always on CPU first
+        t0 = _time.monotonic()
+        logger.info("[1/5] ASRModel.from_pretrained (CPU) …")
         self.asr_model = ASRModel.from_pretrained(model_name=self.model_id)
+        logger.info("[2/5] from_pretrained done (%.1fs)", _time.monotonic() - t0)
+
         self.asr_model.eval()
+        logger.info("[3/5] model.eval() done")
 
-        # Move to device (matches: model = model.cuda().eval())
+        # 2. Move to target device
         if self.device == "cuda":
+            t1 = _time.monotonic()
+            logger.info("[4/5] Moving to CUDA …")
             self.asr_model = self.asr_model.to(self.device)
+            logger.info("[4/5] .to('cuda') done (%.1fs)", _time.monotonic() - t1)
 
-        # Precision
+        # 3. Precision
         if self.device != "cpu":
             if self.dtype == torch.float16:
                 self.asr_model = self.asr_model.half()
+                logger.info("[4/5] .half() applied")
             elif self.dtype == torch.bfloat16:
                 self.asr_model = self.asr_model.bfloat16()
+                logger.info("[4/5] .bfloat16() applied")
 
-        # Disable dither for deterministic inference (from working reference)
+        # 4. Disable dither for deterministic inference (from working reference)
         if hasattr(self.asr_model, "preprocessor") and hasattr(
             self.asr_model.preprocessor, "featurizer"
         ):
             self.asr_model.preprocessor.featurizer.dither = 0.0
 
-        logger.info("Model '%s' loaded and ready on %s", self.model_id, self.device)
+        logger.info(
+            "[5/5] Model '%s' ready on %s (total %.1fs)",
+            self.model_id, self.device, _time.monotonic() - t0,
+        )
 
     # ------------------------------------------------------------------ #
     # WAV helper                                                         #
