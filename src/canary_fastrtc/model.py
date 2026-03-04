@@ -118,11 +118,39 @@ class CanarySTT:
 
         logger.info("Loading model '%s' (target device=%s) …", self.model_id, self.device)
 
-        # 0. Lazy-import NeMo (takes 2-4 min; must NOT happen at module level)
+        # ---- 0. Lazy-import NeMo (takes 2-5 min on cold start) -------------
+        # We do this in sub-steps with logging so hangs can be diagnosed.
         t0 = _time.monotonic()
-        logger.info("[0/5] Importing NeMo ASR …")
-        from nemo.collections.asr.models import ASRModel  # noqa: delayed import
-        logger.info("[0/5] NeMo imported (%.1fs)", _time.monotonic() - t0)
+
+        # Heartbeat: background thread prints every 30s so logs show life
+        import threading as _th
+        _hb_stop = _th.Event()
+
+        def _hb():
+            while not _hb_stop.wait(30):
+                sys.stderr.write(
+                    f"[canary-stt] … still loading NeMo "
+                    f"({_time.monotonic() - t0:.0f}s elapsed)\n"
+                )
+                sys.stderr.flush()
+
+        _hb_thread = _th.Thread(target=_hb, daemon=True, name="nemo-heartbeat")
+        _hb_thread.start()
+
+        try:
+            logger.info("[0a/5] import nemo …")
+            import nemo  # noqa: F811  — base package, light
+            logger.info("[0a/5] nemo base imported (%.1fs)", _time.monotonic() - t0)
+
+            logger.info("[0b/5] import nemo.collections.asr …")
+            import nemo.collections.asr  # triggers ASR-specific init
+            logger.info("[0b/5] nemo.collections.asr imported (%.1fs)", _time.monotonic() - t0)
+
+            logger.info("[0c/5] import ASRModel …")
+            from nemo.collections.asr.models import ASRModel  # full model registry
+            logger.info("[0c/5] ASRModel imported (%.1fs)", _time.monotonic() - t0)
+        finally:
+            _hb_stop.set()  # stop heartbeat regardless of success/failure
 
         # 1. from_pretrained — always on CPU first
         t1 = _time.monotonic()
