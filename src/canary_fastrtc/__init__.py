@@ -1,3 +1,5 @@
+"""canary-fastrtc - NVIDIA Canary-1B-v2 for FastRTC speech-to-text."""
+
 import os as _os
 
 
@@ -20,7 +22,7 @@ def _sanitize_omp_env():
 
 _sanitize_omp_env()
 
-from .model import CanarySTT, get_stt_model, STTModel  # noqa: E402
+from .model import CanarySTT, get_stt_model, STTModel, SUPPORTED_LANGUAGES  # noqa: E402
 from .utils import detect_device, load_audio, resample_audio  # noqa: E402
 
 __version__ = "0.1.0"
@@ -29,6 +31,7 @@ __all__ = [
     "CanarySTT",
     "get_stt_model",
     "STTModel",
+    "SUPPORTED_LANGUAGES",
     "detect_device",
     "load_audio",
     "resample_audio",

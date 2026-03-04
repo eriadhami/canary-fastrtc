@@ -1,40 +1,63 @@
+"""NVIDIA Canary-1B-v2 wrapper for the FastRTC STTModel protocol.
+
+Follows the exact NeMo ASR API used by the working reference implementation:
+    model = ASRModel.from_pretrained("nvidia/canary-1b-v2")
+    model.eval()
+    output = model.transcribe([path], source_lang=..., target_lang=...)
+    text = output[0].text
+"""
+
 from typing import Literal, Optional, Protocol
 from functools import lru_cache
+import logging
 import os
 import sys
 import wave
 import tempfile
-from pathlib import Path
-import click
-import torch
+
 import numpy as np
 from numpy.typing import NDArray
+import torch
+from nemo.collections.asr.models import ASRModel
 
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# FastRTC STTModel protocol
+# ---------------------------------------------------------------------------
 
 class STTModel(Protocol):
     def stt(self, audio: tuple[int, NDArray[np.int16 | np.float32]]) -> str: ...
 
 
+# ---------------------------------------------------------------------------
+# Supported languages (Canary-1B-v2 - 25 European languages)
+# ---------------------------------------------------------------------------
+
+SUPPORTED_LANGUAGES = (
+    "bg", "hr", "cs", "da", "nl",
+    "en", "et", "fi", "fr", "de",
+    "el", "hu", "it", "lv", "lt",
+    "mt", "pl", "pt", "ro", "sk",
+    "sl", "es", "sv", "ru", "uk",
+)
+
+
+# ---------------------------------------------------------------------------
+# CanarySTT - FastRTC-compatible wrapper
+# ---------------------------------------------------------------------------
+
 class CanarySTT:
-    """
-    A Speech-to-Text model using NVIDIA's Canary-1B-v2 via the NeMo toolkit.
-    Implements the FastRTC STTModel protocol.
+    """Speech-to-Text using NVIDIA Canary-1B-v2 via NeMo.
 
-    Canary is a multilingual ASR model supporting 25 European languages.
-    It uses a FastConformer-Transformer encoder-decoder architecture.
+    Implements the FastRTC ``STTModel`` protocol::
 
-    Supported languages:
-        bg (Bulgarian), hr (Croatian), cs (Czech), da (Danish), nl (Dutch),
-        en (English), et (Estonian), fi (Finnish), fr (French), de (German),
-        el (Greek), hu (Hungarian), it (Italian), lv (Latvian), lt (Lithuanian),
-        mt (Maltese), pl (Polish), pt (Portuguese), ro (Romanian), sk (Slovak),
-        sl (Slovenian), es (Spanish), sv (Swedish), ru (Russian), uk (Ukrainian)
+        def stt(self, audio: tuple[int, NDArray]) -> str: ...
 
-    Attributes:
-        model_id: The NVIDIA NeMo model ID
-        device: The device to run inference on ('cpu', 'cuda')
-        dtype: Data type for model weights (float16, float32, bfloat16)
-        language: Source language for transcription
+    Canary-1B-v2 supports 25 European languages for ASR and speech
+    translation.  This wrapper restricts itself to **transcription**
+    (source_lang == target_lang) to satisfy the FastRTC STT contract.
     """
 
     MODEL_OPTIONS = Literal[
@@ -42,13 +65,7 @@ class CanarySTT:
         "nvidia/canary-1b",
     ]
 
-    SUPPORTED_LANGUAGES = (
-        "bg", "hr", "cs", "da", "nl",
-        "en", "et", "fi", "fr", "de",
-        "el", "hu", "it", "lv", "lt",
-        "mt", "pl", "pt", "ro", "sk",
-        "sl", "es", "sv", "ru", "uk",
-    )
+    SUPPORTED_LANGUAGES = SUPPORTED_LANGUAGES
 
     def __init__(
         self,
@@ -58,218 +75,174 @@ class CanarySTT:
         language: str = "en",
     ):
         """
-        Initialize the NVIDIA Canary STT model.
-
         Args:
-            model: Model ID to use (nvidia/canary-1b-v2 or nvidia/canary-1b)
-            device: Device to use for inference (auto-detected if None)
-            dtype: Model precision (float16 recommended for GPU inference)
-            language: Source language code (one of 25 supported languages, e.g. en, it, de, fr, es)
+            model: NeMo model name (must be a Canary variant).
+            device: ``"cuda"`` or ``"cpu"`` (auto-detected when *None*).
+            dtype: Weight precision - ``"float16"`` recommended for GPU.
+            language: ISO-639-1 source language code (e.g. ``"it"``).
         """
         self.model_id = model
         self.language = language
 
-        # Auto-detect device if not specified
+        # --- device ----------------------------------------------------------
         if device is None:
-            if torch.cuda.is_available():
-                self.device = "cuda"
-            else:
-                self.device = "cpu"
+            self.device = "cuda" if torch.cuda.is_available() else "cpu"
         else:
             self.device = device
 
-        if dtype == "float16":
-            self.dtype = torch.float16
-        elif dtype == "bfloat16":
-            self.dtype = torch.bfloat16
-        else:
-            self.dtype = torch.float32
+        # --- dtype -----------------------------------------------------------
+        _dtype_map = {
+            "float16": torch.float16,
+            "bfloat16": torch.bfloat16,
+            "float32": torch.float32,
+        }
+        self.dtype = _dtype_map.get(dtype, torch.float32)
 
-        # Load the model
+        # --- load model (same pattern as the working reference) --------------
         self._load_model()
 
-    @staticmethod
-    def _sanitize_omp_num_threads():
-        """
-        Sanitize OMP_NUM_THREADS if set to a non-integer value.
-
-        Kubernetes often sets OMP_NUM_THREADS to millicore format (e.g. '3500m'),
-        which causes numexpr (imported transitively by NeMo via pandas) to crash
-        with: ValueError: invalid literal for int() with base 10: '3500m'
-        """
-        omp = os.environ.get("OMP_NUM_THREADS", "")
-        if omp and not omp.isdigit():
-            # Convert Kubernetes millicore format (e.g. '3500m' -> 4 threads)
-            if omp.endswith("m") and omp[:-1].isdigit():
-                millicores = int(omp[:-1])
-                threads = max(1, (millicores + 999) // 1000)  # round up
-            else:
-                threads = max(1, os.cpu_count() or 1)
-            os.environ["OMP_NUM_THREADS"] = str(threads)
+    # ------------------------------------------------------------------ #
+    # Model loading - mirrors the working NVIDIA demo exactly            #
+    # ------------------------------------------------------------------ #
 
     def _load_model(self):
-        """Load the Canary model via NVIDIA NeMo toolkit."""
-        import logging
-        _log = logging.getLogger(__name__)
+        """Load the Canary model following the proven NeMo pattern."""
 
-        self._sanitize_omp_num_threads()
+        logger.info("Loading model '%s' ...", self.model_id)
 
-        _log.info("Importing NeMo ASR (this may take a moment) …")
-        try:
-            import nemo.collections.asr as nemo_asr
-        except ImportError:
-            raise ImportError(
-                "NeMo toolkit is required for NVIDIA Canary models. "
-                "Install it with: pip install nemo_toolkit[asr]"
-            )
-        _log.info("NeMo ASR imported successfully")
-
-        _log.info(
-            f"Downloading / loading model '{self.model_id}' "
-            f"(first run downloads ~2 GB) …"
-        )
-        self.asr_model = nemo_asr.models.ASRModel.from_pretrained(
-            model_name=self.model_id
-        )
+        # Exactly: ASRModel.from_pretrained(model_name=...)
+        self.asr_model = ASRModel.from_pretrained(model_name=self.model_id)
         self.asr_model.eval()
-        _log.info(f"Model '{self.model_id}' loaded and ready")
 
-        # Move to specified device
-        if self.device != "cpu":
+        # Move to device (matches: model = model.cuda().eval())
+        if self.device == "cuda":
             self.asr_model = self.asr_model.to(self.device)
 
-        # Set dtype for GPU inference
+        # Precision
         if self.device != "cpu":
             if self.dtype == torch.float16:
                 self.asr_model = self.asr_model.half()
             elif self.dtype == torch.bfloat16:
                 self.asr_model = self.asr_model.bfloat16()
 
-    def _write_temp_wav(self, audio_np: np.ndarray, sample_rate: int) -> str:
-        """
-        Write audio data to a temporary WAV file for NeMo transcription.
+        # Disable dither for deterministic inference (from working reference)
+        if hasattr(self.asr_model, "preprocessor") and hasattr(
+            self.asr_model.preprocessor, "featurizer"
+        ):
+            self.asr_model.preprocessor.featurizer.dither = 0.0
 
-        Args:
-            audio_np: Audio data as numpy array (float32 normalized to [-1, 1])
-            sample_rate: Sample rate of the audio
+        logger.info("Model '%s' loaded and ready on %s", self.model_id, self.device)
 
-        Returns:
-            Path to the temporary WAV file
-        """
+    # ------------------------------------------------------------------ #
+    # WAV helper                                                         #
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _write_temp_wav(audio_np: np.ndarray, sample_rate: int) -> str:
+        """Write a float32 audio array to a 16-bit mono WAV temp file."""
         tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
         tmp_path = tmp.name
         tmp.close()
 
-        # Ensure audio is float32 normalized to [-1, 1]
-        if audio_np.dtype == np.int16:
-            audio_float = audio_np.astype(np.float32) / 32768.0
-        else:
-            audio_float = audio_np.astype(np.float32)
-
-        # Clamp to [-1, 1]
-        audio_float = np.clip(audio_float, -1.0, 1.0)
-
-        # Convert to int16 for WAV writing
-        audio_int16 = (audio_float * 32767).astype(np.int16)
+        audio_f32 = audio_np.astype(np.float32)
+        audio_f32 = np.clip(audio_f32, -1.0, 1.0)
+        pcm16 = (audio_f32 * 32767).astype(np.int16)
 
         with wave.open(tmp_path, "wb") as wf:
             wf.setnchannels(1)
-            wf.setsampwidth(2)  # 16-bit
+            wf.setsampwidth(2)
             wf.setframerate(sample_rate)
-            wf.writeframes(audio_int16.tobytes())
+            wf.writeframes(pcm16.tobytes())
 
         return tmp_path
 
+    # ------------------------------------------------------------------ #
+    # FastRTC STTModel.stt()                                             #
+    # ------------------------------------------------------------------ #
+
     def stt(self, audio: tuple[int, NDArray[np.int16 | np.float32]]) -> str:
-        """
-        Transcribe audio to text using NVIDIA Canary.
+        """Transcribe audio to text.
 
         Args:
-            audio: Tuple of (sample_rate, audio_data)
-                  where audio_data is a numpy array of int16 or float32
+            audio: ``(sample_rate, audio_data)`` - the FastRTC convention.
 
         Returns:
-            Transcribed text as string
+            Transcribed text (empty string on failure).
         """
         sample_rate, audio_np = audio
+
+        # --- pre-process -----------------------------------------------------
         if audio_np.ndim > 1:
             audio_np = audio_np.squeeze()
 
-        # Handle different audio formats
         if audio_np.dtype == np.int16:
             audio_np = audio_np.astype(np.float32) / 32768.0
 
-        # Write to temporary WAV file for NeMo transcription
+        # --- write temp WAV (NeMo transcribes from file paths) ---------------
         tmp_path = self._write_temp_wav(audio_np, sample_rate)
 
         try:
-            # Transcribe using NeMo
-            transcriptions = self.asr_model.transcribe(
-                audio=[tmp_path],
-                batch_size=1,
+            # Transcribe - exact same API as the working NVIDIA demo:
+            #   output = model.transcribe([path], source_lang=..., target_lang=...)
+            #   text = output[0].text
+            output = self.asr_model.transcribe(
+                [tmp_path],
                 source_lang=self.language,
                 target_lang=self.language,
             )
 
-            # Handle different return types from NeMo
-            if isinstance(transcriptions, list) and len(transcriptions) > 0:
-                result = transcriptions[0]
-                # Handle Hypothesis objects (NeMo can return these with beam search)
+            # output is a list; output[0] has a .text attribute
+            if output and len(output) > 0:
+                result = output[0]
                 if hasattr(result, "text"):
                     return result.text.strip()
                 return str(result).strip()
             return ""
+        except Exception:
+            logger.exception("Transcription failed")
+            return ""
         finally:
-            # Clean up temp file
             try:
                 os.unlink(tmp_path)
             except OSError:
                 pass
 
 
-# For simpler imports
+# --------------------------------------------------------------------------- #
+# Convenience constructor (with warm-up)                                      #
+# --------------------------------------------------------------------------- #
+
 @lru_cache
 def get_stt_model(
     model_name: str = "nvidia/canary-1b-v2",
     verbose: bool = True,
     **kwargs,
 ) -> STTModel:
-    """
-    Helper function to easily get a Canary STT model instance with warm-up.
+    """Create a CanarySTT and warm it up with silence.
 
     Args:
-        model_name: Name of the model to use
-        verbose: Whether to print status messages
-        **kwargs: Additional arguments to pass to the model constructor
+        model_name: NeMo model identifier.
+        verbose: Print status to stderr.
+        **kwargs: Forwarded to CanarySTT.
 
     Returns:
-        A warmed-up STTModel instance
+        A ready-to-use STTModel.
     """
-    # Set environment variable for tokenizers
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-    # Create the model - remove verbose from kwargs to avoid TypeError
     filtered_kwargs = {k: v for k, v in kwargs.items() if k != "verbose"}
     m = CanarySTT(model=model_name, **filtered_kwargs)
 
-    # Warm up the model with 1 second of silence
-    sample_rate = 16000
-    audio = np.zeros(sample_rate, dtype=np.float32)
-
-    # Print only to stderr with green styling
+    # Warm up with 1 s of silence
     if verbose:
-        msg = click.style("INFO", fg="green") + ":\t  Warming up Canary STT model.\n"
-        sys.stderr.write(msg)
+        sys.stderr.write("INFO:\t  Warming up Canary STT model.\n")
         sys.stderr.flush()
 
-    # Warm up the model
-    m.stt((sample_rate, audio))
+    sample_rate = 16000
+    m.stt((sample_rate, np.zeros(sample_rate, dtype=np.float32)))
 
     if verbose:
-        msg = (
-            click.style("INFO", fg="green") + ":\t  Canary STT model warmed up.\n"
-        )
-        sys.stderr.write(msg)
+        sys.stderr.write("INFO:\t  Canary STT model warmed up.\n")
         sys.stderr.flush()
 
     return m

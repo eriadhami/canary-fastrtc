@@ -24,11 +24,11 @@ pip install canary-fastrtc[dev]
 
 ### Prerequisites
 
-This package requires the **NVIDIA NeMo toolkit**. It is included as a dependency and will be installed automatically. For GPU inference, ensure you have CUDA-compatible PyTorch installed:
+This package requires the **NVIDIA NeMo toolkit** (installed from the main branch). For GPU inference, ensure you have CUDA-compatible PyTorch installed:
 
 ```bash
-# Example: Install PyTorch with CUDA 12.1
-pip install torch --index-url https://download.pytorch.org/whl/cu121
+# Example: Install PyTorch with CUDA 12.4
+pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu124
 ```
 
 ## Usage
@@ -146,10 +146,9 @@ model = CanarySTT(
 ## Requirements
 
 - Python 3.10+
-- PyTorch 1.13+
-- nemo_toolkit[asr] 2.0+
+- PyTorch 2.0+ (with CUDA recommended for GPU inference)
+- nemo_toolkit[asr] (installed from NeMo main branch)
 - numpy 1.22+
-- click 8.0+ (for console output styling)
 - librosa 0.9+ (optional, for audio file loading)
 
 ## Development

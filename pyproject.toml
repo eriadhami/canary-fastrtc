@@ -19,9 +19,8 @@ classifiers = [
 ]
 dependencies = [
     "numpy>=1.22.0",
-    "torch>=1.13.0",
-    "nemo_toolkit[asr]>=2.0.0",
-    "click>=8.0.0",
+    "torch>=2.0.0",
+    "nemo_toolkit[asr] @ git+https://github.com/NVIDIA/NeMo.git@main",
 ]
 
 [project.urls]
